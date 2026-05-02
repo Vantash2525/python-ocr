@@ -4,4 +4,3 @@ python-multipart
 opencv-python
 paddleocr==3.4.0
 paddlepaddle==3.3.0
-opencv-python-headless

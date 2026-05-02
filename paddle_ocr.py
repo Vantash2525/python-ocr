@@ -1,19 +1,21 @@
-import cv2
 import os
+os.environ["FLAGS_use_mkldnn"] = "0"
+os.environ["PADDLE_DISABLE_ONEDNN"] = "1"
+
+import cv2
 import re
+import logging
 from paddleocr import PaddleOCR
 
-def do_ocr(image_path):
+logging.getLogger("ppocr").setLevel(logging.ERROR)
 
-    os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
-
-    # ---------------- OCR ----------------
-    ocr = PaddleOCR(
-        text_detection_model_name="PP-OCRv5_mobile_det",
-        text_recognition_model_name="en_PP-OCRv5_mobile_rec",
-        det_db_thresh=0.5,
-        det_db_box_thresh=0.5,
-        use_textline_orientation=False
+def do_paddle_ocr(image_path):
+    reader = PaddleOCR(
+        ocr_version="PP-OCRv4",
+        use_angle_cls=True,
+        lang='en',
+        use_gpu=False,
+        show_log=False
     )
 
     img = cv2.imread(image_path)
@@ -21,25 +23,31 @@ def do_ocr(image_path):
         print("❌ Image not loaded")
         return []
 
-    result = ocr.ocr(img)
+    result = reader.ocr(img, cls=True)
+
+    # Handle None or empty result
+    if not result or result[0] is None:
+        print("⚠️ No text detected in image")
+        return []
+
+    page = result[0]
 
     # ---------------- COLLECT TEXT + BOXES ----------------
-    all_results = []  # stores { text, score, box } for every detected word
+    all_results = []
     buff = ""
 
-    for line in result[0]:
-        box = line[0]
-        text, score = line[1]
+    for line in page:
+        box, (text, score) = line
 
         x      = int(box[0][0])
         y      = int(box[0][1])
-        width  = int(box[2][0] - box[0][0])
+        width  = int(box[1][0] - box[0][0])
         height = int(box[2][1] - box[0][1])
 
         all_results.append({
             "text": text,
-            "score": round(score, 2),
-            "box": { "x": x, "y": y, "width": width, "height": height }
+            "score": round(float(score), 2),
+            "box": {"x": x, "y": y, "width": width, "height": height}
         })
 
         print(f"📄 Detected: '{text}' (score: {score:.2f})")
@@ -60,23 +68,19 @@ def do_ocr(image_path):
 
     if not matches:
         print("\n⚠️ No ENC{} pattern found, returning all OCR results")
-        return all_results  # ✅ still return everything instead of exit()
+        return all_results
 
-    # ---------------- FILTER: only return boxes that matched ----------------
+    # ---------------- FILTER ----------------
     print(f"\n✅ Found {len(matches)} matches:\n")
 
     output = []
     for item in all_results:
-        # Normalize this item's text the same way
         normalized = item["text"].replace("(", "{").replace(")", "}") \
                                  .replace("O", "0").replace("l", "1").replace("I", "1")
-
-        # Check if this word is part of any match
         for match in matches:
             if normalized in match or match in normalized:
                 print(f"  ✅ {item['text']} → {item['box']}")
-                output.append(item)  # ✅ keeps the full { text, score, box } dict
+                output.append(item)
                 break
 
-    
-    return output  # ✅ returns list of { text, score, box }
+    return output
